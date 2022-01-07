@@ -1,4 +1,3 @@
---Todo: 
 menu.add_slider_float("ivi: the semi-rage helper | ver.", 1.23, 1.23)
 -- rage
 menu.add_slider_int("Rage features", 0, 0)
