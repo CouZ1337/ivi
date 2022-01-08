@@ -1,4 +1,5 @@
-menu.add_slider_float("ivi: the semi-rage helper | ver.", 1.23, 1.23)
+-- hitsounds folder steamapps\common\Counter-Strike Global Offensive\csgo\sound\ivi_hitsounds
+menu.add_slider_float("ivi: the semi-rage helper | ver.", 1.35, 1.35)
 -- rage
 menu.add_slider_int("Rage features", 0, 0)
 menu.add_check_box("Rage on key")
@@ -19,12 +20,124 @@ menu.add_check_box("Hell ragdoll gravity")
 menu.add_check_box("Disable resolver")
 menu.add_check_box("Enable custom logs")
 menu.add_check_box("Clantag")
+menu.add_check_box("Kill Say")
+menu.add_check_box("Hitsound")
 
 -- FFI
 local ffi = require "ffi"
 ffi.cdef[[
+    typedef void *PVOID;
+    typedef PVOID HANDLE;
+    typedef unsigned long DWORD;
+    typedef bool BOOL;
+    typedef unsigned long ULONG_PTR;
+    typedef long LONG;
+    typedef char CHAR;
+    typedef unsigned char BYTE;
+    typedef unsigned int SIZE_T;
+    typedef const void *LPCVOID;
+    typedef int *FARPROC;
     typedef int(__fastcall* clantag_t)(const char*, const char*);
+    typedef const char *LPCSTR;
+  
+    BOOL CreateDirectoryA(LPCSTR lpPathName, PVOID lpSecurityAttributes);
+    BOOL DeleteUrlCacheEntryA(LPCSTR lpszUrlName);
+  
+    void* __stdcall URLDownloadToFileA(void* LPUNKNOWN, const char* LPCSTR, const char* LPCSTR2, int a, int LPBINDSTATUSCALLBACK);
 ]]
+
+local csgo_sounds_path = './csgo/sound/'
+local sounds_path = 'ivi_hitsounds'
+
+ffi.C.CreateDirectoryA(csgo_sounds_path, NULL)
+ffi.C.CreateDirectoryA(csgo_sounds_path .. sounds_path, NULL)
+
+local sounds = {
+  {
+    url = 'https://cdn.discordapp.com/attachments/851463683392929842/851486047053676554/ting.wav',
+    title = '[SKEET] Ting',
+    file = string.format('%s/ting.wav', sounds_path)
+  },
+  {
+    url = 'https://cdn.discordapp.com/attachments/851463683392929842/851486047846269020/bell.wav',
+    title = '[SKEET] Bell',
+    file = string.format('%s/bell.wav', sounds_path)
+  },
+  {
+    url = 'https://cdn.discordapp.com/attachments/851463683392929842/851486045236101180/msfrs.wav',
+    title = '[ONETAP] Misfires',
+    file = string.format('%s/msfrs.wav', sounds_path)
+  },
+  {
+    url = 'https://cdn.discordapp.com/attachments/883648036230819922/929319684157870130/fatality.wav',
+    title = '[FATALITY] Stappler',
+    file = string.format('%s/fatality.wav', sounds_path)
+  },
+  {
+    url = 'https://cdn.discordapp.com/attachments/883648036230819922/929319684346630174/neverlose.wav',
+    title = '[NEVERLOSE] Hit',
+    file = string.format('%s/neverlose.wav', sounds_path)
+  },
+  {
+    url = 'https://cdn.discordapp.com/attachments/851463683392929842/851486049561870376/bubble.wav',
+    title = '[OTHER] Bubble',
+    file = string.format('%s/bubble.wav', sounds_path)
+  },
+  {
+    url = 'https://cdn.discordapp.com/attachments/883648036230819922/929319684564742194/cod.wav',
+    title = '[OTHER] Call of duty',
+    file = string.format('%s/cod.wav', sounds_path)
+  },
+  {
+    url = 'https://cdn.discordapp.com/attachments/883648036230819922/929319684778635264/custom.wav',
+    title = '[OTHER] Gachimuchi',
+    file = string.format('%s/custom.wav', sounds_path)
+  },
+}
+
+local extlib = {
+  urlmon = ffi.load 'UrlMon',
+  wininet = ffi.load 'WinInet',
+  gdi = ffi.load 'Gdi32',
+}
+
+local file_helpers = {
+  download = function(from_url, to_path)
+    extlib.wininet.DeleteUrlCacheEntryA(from_url);
+    extlib.urlmon.URLDownloadToFileA(nil, from_url, to_path, 0, 0)
+  end,
+}
+
+local combo = {}
+local files = {}
+for _, sound in pairs(sounds) do
+  if sound.url then
+    local file_path = string.format('%s/%s', csgo_sounds_path, sound.file)
+
+    local file = io.open(file_path, 'r')
+    table.insert(files, file)
+    if file then
+      file:close()
+    else
+      file_helpers.download(sound.url, file_path)
+    end
+
+    table.insert(combo, sound.title)
+  end
+end
+
+local hitsound = 0.0
+menu.add_combo_box('Hitsounds', combo)
+
+client.add_callback('create_move', function()
+  hitsound = menu.get_int('Hitsounds')
+end)
+
+client.add_callback('unload', function()
+  for _, file in pairs(files) do
+    file:close()
+  end
+end)
 
 local font = render.create_font("Segoe UI", 33, 0, false, true, true)
 local wpn2tab = {
@@ -60,7 +173,7 @@ local wpn2tab = {
   }
 
 console.execute("clear")
-client.log("ivi: the semirage helper v1.23")
+client.log("ivi: the semirage helper v1.35")
 client.log("coded by CouZ")
 
 function keys()
@@ -236,7 +349,7 @@ function gravity()
         if engine.is_in_game() then
             if tick == first_delay then
                 console.set_int("cl_ragdoll_gravity", -500)
-            elseif tick == secon_delay then
+            elseif tick >= secon_delay then
                 console.set_int("cl_ragdoll_gravity", 600)
                 tick = 0
             end
@@ -258,7 +371,13 @@ function logs1(event)
     local dmg = event:get_int("dmg_health")
     local hitgroup   = event:get_int("hitgroup")
     local remaining  = event:get_int("health")
-    
+    if menu.get_bool("Hitsound") then
+        if attacker_id == me and target ~= me then
+          local file = sounds[hitsound + 1.0].file
+          console.execute(string.format('play %s', file))
+        end
+    end
+
     if menu.get_bool("Enable custom logs") then
         if attacker_id == me and target ~= me then
             if hitgroup == 1 then
@@ -323,31 +442,38 @@ function round(num, numDecimalPlaces)
     return math.floor(num * mult + 0.5) / mult
 end
 local animation = {
-    "               ",
-    "i              ",
-    "im             ",
-    "ima            ",
-    "imag           ",
-	"imagi          ",
-	"imagin         ",
-    "imagine        ",
-	"imagine s      ",
-    "imagine sp     ",
-	"imagine spi    ",
-	"imagine spin   ",
-    "imagine spini  ",
-    "imagine spinin ",
-    "imagine spining",
-    "imagine spining",
-    "imagine spining",
-    "imagine spining",
-    "imagine spining",
-    "imagine spinin ",
-    "imagine spini  ",
-    "imagine spin   ",
-	"imagine spi    ",
-	"imagine sp     ",
-    "imagine s      ",
+    "                ",
+    "1               ",
+    "i               ",
+    "im              ",
+    "im@             ",
+    "ima             ",
+    "imag            ",
+    "imag1           ",
+    "imagi           ",
+    "imagin          ",
+    "imagin€         ",
+    "imagine         ",
+    "imagine s       ",
+    "imagine sp      ",
+    "imagine sp1     ",
+    "imagine spi     ",
+    "imagine spin    ",
+    "imagine spinn   ",
+    "imagine spinn1  ",
+    "imagine spinni  ",
+    "imagine spinnin ",
+    "imagine spinning",
+    "imagine spinning",
+    "imagine spinning",
+    "imagine spinning",
+    "imagine spinning",
+    "imagine spinnin ",
+    "imagine spinni  ",
+    "imagine spinn   ",
+    "imagine spin    ",
+    "imagine spi     ",
+    "imagine sp      ",
     "imagine        ",
     "imagin         ",
     "imagi          ",	
@@ -360,20 +486,24 @@ local animation = {
 
 local old_time = 0
 client.add_callback("on_paint", function()
+    local player = entitylist.get_local_player()
     local curtime = math.floor(globals.get_curtime() * 2)
     if menu.get_bool("Clantag") and engine.is_in_game() then
+        if player:get_team() ~= 2 and player:get_team() ~= 3 then return end
         if old_time ~= curtime and (globals.get_tickcount() % 2) == 1 then
             set_clantag(animation[curtime % #animation+1], animation[curtime % #animation+1])
             old_time = curtime
         end
     elseif not menu.get_bool("Clantag") then
         if engine.is_in_game() and old_time ~= curtime and (globals.get_tickcount() % 2) == 1 then
+            if player:get_team() ~= 2 and player:get_team() ~= 3 then return end
             set_clantag("", "")
             old_time = curtime
         end
     end
 end)
 
+-- disable resolver by forcing enemy body yaw
 function nores()
     if menu.get_bool("Disable resolver") then
         for number = 0, globals.get_maxclients() do
@@ -385,11 +515,68 @@ function nores()
     end
 end
 
+-- killsay
+
+local killchat = {
+    "ez",
+    "lmao, look at ur playstyle..",
+    "little kid captured",
+    "1",
+    "did you know that csgo is free to uninstall?",
+    "1 idiot, iq?",
+    "where iq?",
+    "oww, u died? i didn't see it, sorry.",
+    "get back to work",
+    "nice iq retard",
+    "oops, sorry i didn't see you",
+    "rest in spaghetti never forgetti",
+    "how'd you hit the ACCEPT button with that aim? ah, yes... autoaccept",
+    "FYI: warmup is over already.",
+    "protip: using a mouse is recommended.",
+    "atleast hitler knew when to kill himself.",
+    "you have a reaction time slower than coastal erosion.",
+    "stop buying an awp you $4750 decoy...",
+    "mad cuz bad",
+    "is your monitor on?",
+    "i thought I put bots on hard, why are they on easy?",
+    "Options -> How To Play",
+    "is this casual? I have 16k...",
+    "oops, I must have chosen easy bots by accident...",
+    "the only thing you can throw are rounds.",
+    "if we learn from our mistakes, your parents must be geniuses now.",
+    "you define autism",
+    "if you were a CSGO match, your mother would have a 7day cooldown all the time, because she kept abandoning you.",
+    "your nans like my ak vulcan, battle-scarred.",
+    "isn't it uncomfortable playing csgo in the kitchen?",
+    "my knife is well-worn, just like your mother.",
+}
+
+function killsay(event)
+    if menu.get_bool("Kill Say") then
+    local attacker = engine.get_player_for_user_id(event:get_int("attacker"))
+    local dead = engine.get_player_for_user_id(event:get_int("userid"))
+    local me = engine.get_local_player_index()
+        
+        if attacker == me and dead ~= me then
+          console.execute ("say " .. killchat[math.random(1,#killchat)])
+        end
+    end
+end
+
+function refresh_tabelements()
+    menu.get_bool("Kill Say")
+    menu.get_bool("Hitsound")
+    menu.get_bool("Enable custom logs")
+end
+
 -- callbacks
+client.add_callback("on_paint", refresh_tabelements)
+events.register_event("player_death", killsay)
 client.add_callback("on_paint", keys)
 client.add_callback("on_paint", anti_aims_tab)
 client.add_callback("on_paint", indicators)
 client.add_callback("on_paint", gravity)
+client.add_callback("on_paint", nores)
 client.add_callback("on_shot", logs2)
 events.register_event("player_hurt", logs1)
-client.add_callback("on_paint", nores)
+events.register_event("player_death", killsay)
